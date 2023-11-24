@@ -36,8 +36,8 @@ const config: HardhatUserConfig = {
             // If you want to do some forking set `enabled` to true
             forking: {
                 url: `${MAINNET_RPC_URL}${process.env.INFURA_API_KEY}`,
-            //     blockNumber: Number(FORKING_BLOCK_NUMBER),
-            //     enabled: false,
+                // blockNumber: Number(FORKING_BLOCK_NUMBER),
+                enabled: true,
             },
             chainId: 31337,
         },

@@ -29,6 +29,21 @@ contract UniswapV3Adapter {
     mapping(uint256 => Position) public positions;
 
     error NotOwner(uint256 tokenId);
+    error CreatePoolFailed(address tokenA, address tokenB);
+    error MintPositionFailed(address token0, address token1);
+    error CollectFeeFailed(uint256 tokenId, address recipient);
+    error SwapExactInputFailed(
+        bytes path,
+        address tokenIn,
+        address recipient,
+        uint256 amountIn
+    );
+    error SwapExactOutputFailed(
+        bytes path,
+        address tokenIn,
+        address recipient,
+        uint256 amountOut
+    );
 
     event PoolCreated(
         address indexed pool,
@@ -77,10 +92,6 @@ contract UniswapV3Adapter {
     constructor(address _positionManager, address _swapRouter) {
         positionManager = INonfungiblePositionManager(_positionManager);
         swapRouter = ISwapRouter(_swapRouter);
-        // nonfungiblePositionManager = INonfungiblePositionManager(
-        //     0xC36442b4a4522E871399CD717aBDD847Ab11FE88
-        // );
-        // swapRouter = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
     }
 
     function sortTokens(
@@ -97,15 +108,21 @@ contract UniswapV3Adapter {
     ) external returns (address) {
         (address tokenA, address tokenB) = sortTokens(token0, token1);
 
-        pool = positionManager.createAndInitializePoolIfNecessary(
-            tokenA,
-            tokenB,
-            FEE,
-            sqrtPriceX96
-        );
-        emit PoolCreated(pool, tokenA, tokenB, FEE);
+        try
+            positionManager.createAndInitializePoolIfNecessary(
+                tokenA,
+                tokenB,
+                FEE,
+                sqrtPriceX96
+            )
+        returns (address newPool) {
+            pool = newPool;
+            emit PoolCreated(pool, tokenA, tokenB, FEE);
 
-        return pool;
+            return pool;
+        } catch {
+            revert CreatePoolFailed({tokenA: tokenA, tokenB: tokenB});
+        }
     }
 
     function mintNewPositions(
@@ -123,7 +140,6 @@ contract UniswapV3Adapter {
             uint256 amount1
         )
     {
-        //custom errors
         (address tokenA, address tokenB) = sortTokens(token0, token1);
 
         TransferHelper.safeTransferFrom(
@@ -150,49 +166,70 @@ contract UniswapV3Adapter {
             amount1ToMint
         );
 
-        (tokenId, liquidity, amount0, amount1) = positionManager.mint(
-            INonfungiblePositionManager.MintParams({
+        try
+            positionManager.mint(
+                INonfungiblePositionManager.MintParams({
+                    token0: tokenA,
+                    token1: tokenB,
+                    fee: poolFee,
+                    tickLower: MIN_TICK,
+                    tickUpper: MAX_TICK,
+                    amount0Desired: amount0ToMint,
+                    amount1Desired: amount1ToMint,
+                    amount0Min: 0,
+                    amount1Min: 0,
+                    recipient: address(this),
+                    deadline: block.timestamp + 600 seconds
+                })
+            )
+        returns (
+            uint256 newTokenId,
+            uint128 newLiquidity,
+            uint256 newAmount0,
+            uint256 newAmount1
+        ) {
+            tokenId = newTokenId;
+            liquidity = newLiquidity;
+            amount0 = newAmount0;
+            amount1 = newAmount1;
+
+            positions[tokenId] = Position({
+                owner: msg.sender,
                 token0: tokenA,
                 token1: tokenB,
-                fee: poolFee,
-                tickLower: MIN_TICK,
-                tickUpper: MAX_TICK,
-                amount0Desired: amount0ToMint,
-                amount1Desired: amount1ToMint,
-                amount0Min: 0,
-                amount1Min: 0,
-                recipient: address(this),
-                deadline: block.timestamp + 600 seconds
-            })
-        );
-        positions[tokenId] = Position({
-            owner: msg.sender,
-            token0: tokenA,
-            token1: tokenB,
-            amount0: amount0,
-            amount1: amount1,
-            liquidity: liquidity
-        });
-        if (amount0 < amount0ToMint) {
-            TransferHelper.safeApprove(token0, address(positionManager), 0);
-            TransferHelper.safeTransfer(
-                token0,
-                msg.sender,
-                (amount0ToMint - amount0)
-            );
-        }
+                amount0: amount0,
+                amount1: amount1,
+                liquidity: liquidity
+            });
+            if (amount0 < amount0ToMint) {
+                TransferHelper.safeApprove(token0, address(positionManager), 0);
+                TransferHelper.safeTransfer(
+                    token0,
+                    msg.sender,
+                    (amount0ToMint - amount0)
+                );
+            }
 
-        if (amount1 < amount1ToMint) {
-            TransferHelper.safeApprove(token1, address(positionManager), 0);
-            TransferHelper.safeTransfer(
-                token1,
+            if (amount1 < amount1ToMint) {
+                TransferHelper.safeApprove(token1, address(positionManager), 0);
+                TransferHelper.safeTransfer(
+                    token1,
+                    msg.sender,
+                    (amount1ToMint - amount1)
+                );
+            }
+            emit PositionMinted(
+                tokenId,
                 msg.sender,
-                (amount1ToMint - amount1)
+                liquidity,
+                amount0,
+                amount1
             );
-        }
-        emit PositionMinted(tokenId, msg.sender, liquidity, amount0, amount1);
 
-        return (tokenId, liquidity, amount0, amount1);
+            return (tokenId, liquidity, amount0, amount1);
+        } catch {
+            revert MintPositionFailed({token0: tokenA, token1: tokenB});
+        }
     }
 
     function collectAllFees(
@@ -200,17 +237,24 @@ contract UniswapV3Adapter {
     ) external returns (uint256 amount0, uint256 amount1) {
         Position memory position = positions[tokenId];
         if (msg.sender != position.owner) revert NotOwner({tokenId: tokenId});
-        (amount0, amount1) = positionManager.collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: msg.sender,
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            })
-        );
-        emit FeesCollected(tokenId, msg.sender, amount0, amount1);
+        try
+            positionManager.collect(
+                INonfungiblePositionManager.CollectParams({
+                    tokenId: tokenId,
+                    recipient: msg.sender,
+                    amount0Max: type(uint128).max,
+                    amount1Max: type(uint128).max
+                })
+            )
+        returns (uint256 newAmount0, uint256 newAmount1) {
+            amount0 = newAmount0;
+            amount1 = newAmount1;
+            emit FeesCollected(tokenId, msg.sender, amount0, amount1);
 
-        return (amount0, amount1);
+            return (amount0, amount1);
+        } catch {
+            revert CollectFeeFailed({tokenId: tokenId, recipient: msg.sender});
+        }
     }
 
     function decreaseLiquidity(
@@ -309,19 +353,29 @@ contract UniswapV3Adapter {
             amountIn
         );
         TransferHelper.safeApprove(tokenIn, address(swapRouter), amountIn);
-        amountOut = swapRouter.exactInput(
-            ISwapRouter.ExactInputParams({
+        try
+            swapRouter.exactInput(
+                ISwapRouter.ExactInputParams({
+                    path: path,
+                    recipient: msg.sender,
+                    deadline: block.timestamp + 600 seconds,
+                    amountIn: amountIn,
+                    amountOutMinimum: amountOutMinimum
+                })
+            )
+        returns (uint256 newAmountOut) {
+            amountOut = newAmountOut;
+            emit SwapExactInput(tokenIn, amountIn, amountOut);
+
+            return amountOut;
+        } catch {
+            revert SwapExactInputFailed({
                 path: path,
+                tokenIn: tokenIn,
                 recipient: msg.sender,
-                deadline: block.timestamp + 600 seconds,
-                amountIn: amountIn,
-                amountOutMinimum: amountOutMinimum
-            })
-        );
-
-        emit SwapExactInput(tokenIn, amountIn, amountOut);
-
-        return amountOut;
+                amountIn: amountIn
+            });
+        }
     }
 
     function swapExactOutput(
@@ -342,25 +396,36 @@ contract UniswapV3Adapter {
             amountInMaximum
         );
 
-        amountIn = swapRouter.exactOutput(
-            ISwapRouter.ExactOutputParams({
-                path: path,
-                recipient: msg.sender,
-                deadline: block.timestamp + 600 seconds,
-                amountOut: amountOut,
-                amountInMaximum: amountInMaximum
-            })
-        );
-        if (amountIn < amountInMaximum) {
-            TransferHelper.safeApprove(tokenIn, address(swapRouter), 0);
-            TransferHelper.safeTransfer(
-                tokenIn,
-                msg.sender,
-                (amountInMaximum - amountIn)
-            );
-        }
-        emit SwapExactOutput(tokenIn, amountIn, amountOut);
+        try
+            swapRouter.exactOutput(
+                ISwapRouter.ExactOutputParams({
+                    path: path,
+                    recipient: msg.sender,
+                    deadline: block.timestamp + 600 seconds,
+                    amountOut: amountOut,
+                    amountInMaximum: amountInMaximum
+                })
+            )
+        returns (uint256 newAmountIn) {
+            amountIn = newAmountIn;
+            if (amountIn < amountInMaximum) {
+                TransferHelper.safeApprove(tokenIn, address(swapRouter), 0);
+                TransferHelper.safeTransfer(
+                    tokenIn,
+                    msg.sender,
+                    (amountInMaximum - amountIn)
+                );
+            }
+            emit SwapExactOutput(tokenIn, amountIn, amountOut);
 
-        return amountIn;
+            return amountIn;
+        } catch {
+            revert SwapExactOutputFailed({
+                path: path,
+                tokenIn: tokenIn,
+                recipient: msg.sender,
+                amountOut: amountOut
+            });
+        }
     }
 }

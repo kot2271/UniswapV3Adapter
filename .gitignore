@@ -1,6 +1,7 @@
 node_modules
 .env
 .Ds_Store
+.vscode
 
 # Hardhat files
 /cache

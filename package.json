@@ -42,9 +42,12 @@
     "@babel/eslint-parser": "^7.22.10",
     "@openzeppelin/contracts": "^4.9.3",
     "@uniswap/v3-periphery": "^1.4.3",
+    "decimal.js": "^10.4.3",
     "dotenv": "^10.0.0",
+    "evm-bn": "^1.1.2",
     "fs": "^0.0.1-security",
-    "hardhat-shorthand": "^1.0.0"
+    "hardhat-shorthand": "^1.0.0",
+    "hardhat-tracer": "^2.7.0"
   },
   "mocha": {
     "timeout": 10000000

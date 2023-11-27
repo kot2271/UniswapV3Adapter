@@ -6,6 +6,7 @@ import "@nomicfoundation/hardhat-chai-matchers"
 import "@nomiclabs/hardhat-ethers"
 import "hardhat-deploy"
 import "hardhat-contract-sizer"
+import "hardhat-tracer"
 import "./tasks"
 
 dotenv.config()
@@ -36,7 +37,7 @@ const config: HardhatUserConfig = {
             // If you want to do some forking set `enabled` to true
             forking: {
                 url: `${MAINNET_RPC_URL}${process.env.INFURA_API_KEY}`,
-                // blockNumber: Number(FORKING_BLOCK_NUMBER),
+                blockNumber: Number(FORKING_BLOCK_NUMBER),
                 enabled: true,
             },
             chainId: 31337,

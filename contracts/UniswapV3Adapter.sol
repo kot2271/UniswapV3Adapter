@@ -228,12 +228,12 @@ contract UniswapV3Adapter {
                 deadline: block.timestamp + 600 seconds
             })
         );
-        positions[tokenId].liquidity -= liquidity;
+        uint128 newLiquidity = positions[tokenId].liquidity -= liquidity;
 
         emit LiquidityDecreased(
             tokenId,
             msg.sender,
-            liquidity,
+            newLiquidity,
             amount0,
             amount1
         );
@@ -283,12 +283,12 @@ contract UniswapV3Adapter {
                 deadline: block.timestamp + 600 seconds
             })
         );
-        positions[tokenId].liquidity += liquidity;
+        uint128 newLiquidity = positions[tokenId].liquidity += liquidity;
 
         emit LiquidityIncreased(
             tokenId,
             msg.sender,
-            liquidity,
+            newLiquidity,
             amount0,
             amount1
         );

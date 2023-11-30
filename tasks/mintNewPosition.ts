@@ -1,7 +1,6 @@
 import { task } from "hardhat/config";
 import { UniswapV3Adapter, TestToken } from "../typechain";
 import { BigNumber } from "ethers";
-import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { HardhatRuntimeEnvironment, TaskArguments } from "hardhat/types";
 
 task("mintNewPosition", "Mints a new position")
@@ -37,20 +36,6 @@ task("mintNewPosition", "Mints a new position")
       const reserve1: BigNumber = hre.ethers.utils.parseEther(
         taskArgs.reserve1 as string
       );
-
-      const accounts: SignerWithAddress[] = await hre.ethers.getSigners();
-
-      const owner: SignerWithAddress = accounts[0];
-
-      tokenA
-        .connect(owner)
-        .approve(v3Adapter.address, reserve1.add(reserve1.mul(2)));
-      tokenB
-        .connect(owner)
-        .approve(v3Adapter.address, reserve0.add(reserve0.mul(2)));
-
-      await tokenA.allowance(owner.address, v3Adapter.address);
-      await tokenB.allowance(owner.address, v3Adapter.address);
 
       await v3Adapter.mintNewPositions(
         tokenA.address,

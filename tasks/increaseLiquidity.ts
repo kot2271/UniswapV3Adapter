@@ -1,7 +1,6 @@
 import { task } from "hardhat/config";
 import { UniswapV3Adapter, TestToken } from "../typechain";
 import { BigNumber } from "ethers";
-import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { HardhatRuntimeEnvironment, TaskArguments } from "hardhat/types";
 
 task("increaseLiquidity", "Increases position liquidity")
@@ -33,16 +32,6 @@ task("increaseLiquidity", "Increases position liquidity")
 
       const amountA = hre.ethers.utils.parseEther(taskArgs.amountA as string);
       const amountB = hre.ethers.utils.parseEther(taskArgs.amountB as string);
-
-      const accounts: SignerWithAddress[] = await hre.ethers.getSigners();
-
-      const owner: SignerWithAddress = accounts[0];
-
-      await tokenA.approve(v3Adapter.address, amountA.add(amountB));
-      await tokenB.approve(v3Adapter.address, amountB.add(amountA));
-
-      await tokenA.allowance(owner.address, v3Adapter.address);
-      await tokenB.allowance(owner.address, v3Adapter.address);
 
       await v3Adapter.increaseLiquidity(tokenId, amountA, amountB);
       const filter = v3Adapter.filters.LiquidityIncreased();

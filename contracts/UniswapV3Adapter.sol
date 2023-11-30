@@ -14,8 +14,18 @@ contract UniswapV3Adapter {
     int24 public constant MAX_TICK = 887270;
     uint24 public constant FEE = 500;
 
+    // Address of the pool
     address public pool;
 
+    /**
+     * @notice Struct that stores position data.
+     * @param owner address of the position owner
+     * @param token0 first token address
+     * @param token1 second token address
+     * @param amount0 token0 amount
+     * @param amount1 token1 amount
+     * @param liquidity liquidity value
+     */
     struct Position {
         address owner;
         address token0;
@@ -25,17 +35,39 @@ contract UniswapV3Adapter {
         uint128 liquidity;
     }
 
-    // Хеш-таблица, в которой хранятся позиции.
+    /**
+     * @notice Mapping that stores positions by their token ID.
+     */
     mapping(uint256 => Position) public positions;
 
+    /**
+     * Error generated when the caller is not the owner of the position.
+     * @param tokenId Id token for liquidity pair
+     */
     error NotOwner(uint256 tokenId);
 
+    /**
+     * Event generated upon pool creation.
+     * @param pool pool address
+     * @param token0 first token address
+     * @param token1 second token address
+     * @param fee the value of the commission. 
+     */
     event PoolCreated(
         address indexed pool,
         address token0,
         address token1,
         uint24 fee
     );
+
+    /**
+     * Event generated upon creating a new position.
+     * @param tokenId Id token for liquidity pair
+     * @param owner address of the owner
+     * @param liquidity liquidity value
+     * @param amount0 token0 that was paid to add this amount of liquidity
+     * @param amount1 the amount of token1 that was paid to add this amount of liquidity.
+     */
     event PositionMinted(
         uint256 indexed tokenId,
         address indexed owner,
@@ -43,12 +75,29 @@ contract UniswapV3Adapter {
         uint256 amount0,
         uint256 amount1
     );
+
+    /**
+     * Event generated upon collecting fees from a position.
+     * @param tokenId Id token for liquidity pair
+     * @param owner address of the owner
+     * @param amount0 Commission with the first token.
+     * @param amount1 Commission with the second token.
+     */
     event FeesCollected(
         uint256 indexed tokenId,
         address indexed owner,
         uint256 amount0,
         uint256 amount1
     );
+
+    /**
+     * Event generated upon decreasing the liquidity of a position.
+     * @param tokenId Id token for liquidity pair
+     * @param owner address of the owner
+     * @param liquidity new liquidity value
+     * @param amount0 token0 that was paid to add this amount of liquidity
+     * @param amount1 the amount of token1 that was paid to add this amount of liquidity.
+     */
     event LiquidityDecreased(
         uint256 indexed tokenId,
         address indexed owner,
@@ -56,6 +105,15 @@ contract UniswapV3Adapter {
         uint256 amount0,
         uint256 amount1
     );
+
+    /**
+     * Event generated upon increasing the liquidity of a position.
+     * @param tokenId Id token for liquidity pair
+     * @param owner address of the owner
+     * @param liquidity new liquidity value
+     * @param amount0 token0 that was paid to add this amount of liquidity
+     * @param amount1 the amount of token1 that was paid to add this amount of liquidity.
+     */
     event LiquidityIncreased(
         uint256 indexed tokenId,
         address indexed owner,
@@ -63,26 +121,51 @@ contract UniswapV3Adapter {
         uint256 amount0,
         uint256 amount1
     );
+
+    /**
+     * Event generated upon exchanging an exact amount of input token.
+     * @param tokenIn address of the input token
+     * @param amountIn amount of input token
+     * @param amountOut amount of output token
+     */
     event SwapExactInput(
         address indexed tokenIn,
         uint256 amountIn,
         uint256 amountOut
     );
+
+    /**
+     * Event generated upon exchanging for an exact amount of output token.
+     * @param tokenIn address of the input token
+     * @param amountIn amount of input token
+     * @param amountOut amount of output token
+     */
     event SwapExactOutput(
         address indexed tokenIn,
         uint256 amountIn,
         uint256 amountOut
     );
 
+    /**
+     * This is the contract constructor 
+     * that initializes positionManager 
+     * and swapRouter with the provided addresses
+     * @param _positionManager INonfungiblePositionManager
+     * @param _swapRouter ISwapRouter
+     */
     constructor(address _positionManager, address _swapRouter) {
         positionManager = INonfungiblePositionManager(_positionManager);
         swapRouter = ISwapRouter(_swapRouter);
-        // nonfungiblePositionManager = INonfungiblePositionManager(
-        //     0xC36442b4a4522E871399CD717aBDD847Ab11FE88
-        // );
-        // swapRouter = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
     }
 
+    /**
+     * This function takes two tokens 
+     * and returns them in sorted order.
+     * @param token0 non-sorted token
+     * @param token1 non-sorted token
+     * @return tokenA first token
+     * @return tokenB second token
+     */
     function sortTokens(
         address token0,
         address token1
@@ -90,6 +173,13 @@ contract UniswapV3Adapter {
         return token0 < token1 ? (token0, token1) : (token1, token0);
     }
 
+    /**
+     * This function creates a pool for two tokens 
+     * and initializes it with the provided square root price.
+     * @param token0 first token
+     * @param token1 second token
+     * @param sqrtPriceX96 Price limit Q64.96 is calculated from 'getSqrtPriceX96'
+     */
     function createPool(
         address token0,
         address token1,
@@ -108,6 +198,20 @@ contract UniswapV3Adapter {
         return pool;
     }
 
+    /**
+     * This function allows creating a new position in the pool, 
+     * passing two tokens, pool fee, 
+     * and the amount of each token for mining.
+     * @param token0 first token address
+     * @param token1 second token address
+     * @param poolFee pool fee
+     * @param amount0ToMint Minimum amount of mining first tokens required.
+     * @param amount1ToMint Minimum amount of mining second tokens required.
+     * @return tokenId Id token for liquidity pair.
+     * @return liquidity Liquidity value
+     * @return amount0 token0 that was paid to add this amount of liquidity
+     * @return amount1 the amount of token1 that was paid to add this amount of liquidity.
+     */
     function mintNewPositions(
         address token0,
         address token1,
@@ -123,7 +227,6 @@ contract UniswapV3Adapter {
             uint256 amount1
         )
     {
-        //custom errors
         (address tokenA, address tokenB) = sortTokens(token0, token1);
 
         TransferHelper.safeTransferFrom(
@@ -195,6 +298,13 @@ contract UniswapV3Adapter {
         return (tokenId, liquidity, amount0, amount1);
     }
 
+    /**
+     * This function allows collecting all fees 
+     * from the position specified by the token ID
+     * @param tokenId Id token for liquidity pair
+     * @return amount0 Commission with the first token.
+     * @return amount1 Commission with the second token.
+     */
     function collectAllFees(
         uint256 tokenId
     ) external returns (uint256 amount0, uint256 amount1) {
@@ -213,6 +323,14 @@ contract UniswapV3Adapter {
         return (amount0, amount1);
     }
 
+    /**
+     * This function allows decreasing the liquidity
+     *  of the position specified by the token ID.
+     * @param tokenId Id token for liquidity pair
+     * @param liquidity new liquidity value
+     * @return amount0 token0 that was paid to add this amount of liquidity
+     * @return amount1 the amount of token1 that was paid to add this amount of liquidity.
+     */
     function decreaseLiquidity(
         uint256 tokenId,
         uint128 liquidity
@@ -241,6 +359,16 @@ contract UniswapV3Adapter {
         return (amount0, amount1);
     }
 
+    /**
+     * This function allows increasing the liquidity 
+     * of the position specified by the token ID.
+     * @param tokenId Id token for liquidity pair
+     * @param amountAdd0 The value by which the position of the first token is increased.
+     * @param amountAdd1 The value by which the position of the second token is increased.
+     * @return liquidity new liquidity value
+     * @return amount0 token0 that was paid to add this amount of liquidity
+     * @return amount1 the amount of token1 that was paid to add this amount of liquidity.
+     */
     function increaseLiquidity(
         uint256 tokenId,
         uint256 amountAdd0,
@@ -296,6 +424,14 @@ contract UniswapV3Adapter {
         return (liquidity, amount0, amount1);
     }
 
+    /**
+     * This function allows exchanging an exact amount of input token 
+     * for a minimum amount of output token.
+     * @param tokenIn input token
+     * @param amountIn the amount of the inbound asset
+     * @param amountOutMinimum the minimum amount of the outbound asset, less than which will cause the transaction to revert.
+     * @param path The path is a sequence of (tokenAddress - fee - tokenAddress)
+     */
     function swapExactInput(
         address tokenIn,
         uint256 amountIn,
@@ -324,6 +460,14 @@ contract UniswapV3Adapter {
         return amountOut;
     }
 
+    /**
+     * This function allows exchanging a maximum amount of input token 
+     * for an exact amount of output token.
+     * @param tokenIn input token
+     * @param amountOut exact amount of output token
+     * @param amountInMaximum maximum amount of input token
+     * @param path The path is a sequence of (tokenAddress - fee - tokenAddress)
+     */
     function swapExactOutput(
         address tokenIn,
         uint256 amountOut,
